@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/lukasschwab/feedcel/pkg/cel"
 	"github.com/lukasschwab/feedcel/pkg/feed"
 	"github.com/mmcdole/gofeed"
@@ -24,8 +26,8 @@ func main() {
 	expr := flag.String("expr", "", "CEL expression to filter items")
 	flag.Parse()
 
-	if *feedRef == "" || *expr == "" {
-		fmt.Println("Usage: feedcel -feed <url_or_path> -expr <cel_expression>")
+	if *feedRef == "" {
+		fmt.Println("Usage: feedcel -feed <url_or_path> [-expr <cel_expression>]")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -49,9 +51,32 @@ func main() {
 		log.Fatalf("Failed to parse feed: %v", err)
 	}
 
+	// Initialize CEL environment early for validation
 	env, err := cel.NewEnv()
 	if err != nil {
 		log.Fatalf("Failed to create CEL env: %v", err)
+	}
+
+	// If expr not provided, ask interactively
+	if *expr == "" {
+		err := huh.NewInput().
+			Title("Enter CEL Filter Expression").
+			Placeholder("e.g. item.Title.contains('Go')").
+			Value(expr).
+			Validate(func(s string) error {
+				if s == "" {
+					return errors.New("expression cannot be empty")
+				}
+				_, err := cel.Compile(env, s)
+				return err
+			}).
+			Run()
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Println(ANSIYellow + *expr + ANSIReset + "\n")
 	}
 
 	prg, err := cel.Compile(env, *expr)
