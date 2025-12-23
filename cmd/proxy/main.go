@@ -6,17 +6,20 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"time"
 
+	celgo "github.com/google/cel-go/cel"
 	"github.com/lukasschwab/feedcel/pkg/cel"
 	"github.com/lukasschwab/feedcel/pkg/feed"
+	"github.com/mmcdole/gofeed"
 )
 
 func main() {
 	port := flag.Int("port", 8080, "Port to listen on")
 	flag.Parse()
 
-	http.HandleFunc("/filter", handleFilter)
+	http.HandleFunc("/filter", new(Filterer).Handle)
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("Starting proxy server on %s", addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
@@ -29,10 +32,53 @@ type FilterRequest struct {
 	Expression string `json:"expression"`
 }
 
-func handleFilter(w http.ResponseWriter, r *http.Request) {
+func NewFilterer(client *http.Client) (*Filterer, error) {
+	fp := gofeed.NewParser()
+	if client != nil {
+		fp.Client = client
+	}
+
+	env, err := cel.NewEnv()
+	if err != nil {
+		log.Printf("Error creating CEL env: %v", err)
+		return nil, err
+	}
+
+	return &Filterer{
+		parser: fp,
+		env:    env,
+	}, nil
+}
+
+type Filterer struct {
+	parser *gofeed.Parser
+	env    *celgo.Env
+}
+
+func (f *Filterer) Filter(
+	parsed *gofeed.Feed,
+	now time.Time,
+	url, expr string,
+) (*gofeed.Feed, error) {
+	prg, err := cel.Compile(f.env, expr)
+	if err != nil {
+		return nil, err
+	}
+	parsed.Items = slices.DeleteFunc(parsed.Items, func(i *gofeed.Item) bool {
+		celItem := feed.Transform(i)
+		match, err := cel.Evaluate(prg, celItem, now)
+		if err != nil {
+			log.Printf("Evaluation failed for item '%v': %v", i.GUID, err)
+		}
+		// DeleteFunc deletes when predicate is true.
+		return !match
+	})
+	return parsed, nil
+}
+
+func (f *Filterer) Handle(w http.ResponseWriter, r *http.Request) {
 	// Support both GET query params and POST JSON body
 	var urlStr, exprStr string
-
 	if r.Method == http.MethodPost {
 		var req FilterRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -51,47 +97,19 @@ func handleFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Fetch and Parse Feed
-	ctx := r.Context()
-	items, err := feed.FetchAndParse(ctx, urlStr)
+	parsed, err := f.parser.ParseURLWithContext(urlStr, r.Context())
 	if err != nil {
-		log.Printf("Error fetching feed: %v", err)
-		http.Error(w, "Failed to fetch feed: "+err.Error(), http.StatusBadGateway)
-		return
+		http.Error(w, fmt.Sprintf("failed to fetch feed: %v", err), http.StatusBadGateway)
 	}
 
-	// 2. Setup CEL
-	env, err := cel.NewEnv()
+	filtered, err := f.Filter(parsed, time.Now(), urlStr, exprStr)
 	if err != nil {
-		log.Printf("Error creating CEL env: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+		http.Error(w, fmt.Sprintf("failed to filter feed: %v", err), http.StatusInternalServerError)
 	}
 
-	prg, err := cel.Compile(env, exprStr)
-	if err != nil {
-		log.Printf("Error compiling expression: %v", err)
-		http.Error(w, "Invalid CEL expression: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// 3. Filter Items
-	now := time.Now()
-	filteredItems := make([]cel.Item, 0)
-	for _, item := range items {
-		match, err := cel.Evaluate(prg, item, now)
-		if err != nil {
-			log.Printf("Error evaluating item %s: %v", item.URL, err)
-			continue
-		}
-		if match {
-			filteredItems = append(filteredItems, item)
-		}
-	}
-
-	// 4. Return Result
+	// TODO: render this as a feed insteadd of simple JSON encoding.
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(filteredItems); err != nil {
+	if err := json.NewEncoder(w).Encode(filtered); err != nil {
 		log.Printf("Error encoding response: %v", err)
 	}
 }

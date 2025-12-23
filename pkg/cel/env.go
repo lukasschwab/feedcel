@@ -21,8 +21,7 @@ type Item struct {
 	Author *string
 	Tags   *string // Comma-separated, feed-defined tags for the item
 
-	Content       *string
-	ContentLength int
+	Content *string
 
 	Published time.Time
 	Updated   time.Time
@@ -62,11 +61,8 @@ func Evaluate(prg cel.Program, item Item, now time.Time) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-
-	// Expect a boolean result
 	if b, ok := out.Value().(bool); ok {
 		return b, nil
 	}
-
 	return false, fmt.Errorf("expression did not return a boolean")
 }

@@ -115,22 +115,6 @@ func TestEvaluate(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "ContentLength check",
-			expr: `item.ContentLength > 100`,
-			item: cel.Item{
-				ContentLength: 150,
-			},
-			want: true,
-		},
-		{
-			name: "ContentLength check (fail)",
-			expr: `item.ContentLength > 100`,
-			item: cel.Item{
-				ContentLength: 50,
-			},
-			want: false,
-		},
-		{
 			name: "Timestamp check (recent)",
 			expr: `now - item.Published < duration("2h")`,
 			item: cel.Item{

@@ -1,48 +1,27 @@
 package feed
 
 import (
-	"context"
 	"strings"
 
 	"github.com/lukasschwab/feedcel/pkg/cel"
 	"github.com/mmcdole/gofeed"
 )
 
-// FetchAndParse fetches a feed from a URL and parses it into Items.
-func FetchAndParse(ctx context.Context, url string) ([]cel.Item, error) {
-	fp := gofeed.NewParser()
-	feed, err := fp.ParseURLWithContext(url, ctx)
-	if err != nil {
-		return nil, err
+// Transform gofeed item into cel.Item: adapter for gofeed. See usage in proxy.
+func Transform(i *gofeed.Item) (result cel.Item) {
+	result.URL = i.Link
+	if i.Title != "" {
+		result.Title = &i.Title
 	}
-
-	items := make([]cel.Item, 0, len(feed.Items))
-	for _, fItem := range feed.Items {
-		item := cel.Item{
-			URL: fItem.Link,
-		}
-
-		if fItem.Title != "" {
-			item.Title = &fItem.Title
-		}
-
-		if fItem.Author != nil {
-			item.Author = &fItem.Author.Name
-		} else if len(fItem.Authors) > 0 {
-			item.Author = &fItem.Authors[0].Name
-		}
-
-		if len(fItem.Categories) > 0 {
-			tags := strings.Join(fItem.Categories, ",")
-			item.Tags = &tags
-		}
-
-		if fItem.Content != "" {
-			item.ContentLength = len(fItem.Content)
-		}
-
-		items = append(items, item)
+	if i.Author != nil {
+		result.Author = &i.Author.Name
+	} else if len(i.Authors) > 0 {
+		result.Author = &i.Authors[0].Name
 	}
-
-	return items, nil
+	if len(i.Categories) > 0 {
+		tags := strings.Join(i.Categories, ",")
+		result.Tags = &tags
+	}
+	result.Content = &i.Content
+	return result
 }
