@@ -1,4 +1,4 @@
-package main
+package proxy_test
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lukasschwab/feedcel/pkg/proxy"
 	"github.com/mmcdole/gofeed"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -79,7 +80,7 @@ func TestHandle(t *testing.T) {
 			statusCode:   http.StatusOK,
 		},
 	}
-	f, err := NewFilterer(client)
+	f, err := proxy.NewFilterer(client)
 	if err != nil {
 		t.Fatalf("NewFilterer failed: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestHandle(t *testing.T) {
 		{
 			name:   "POST simple filter",
 			method: http.MethodPost,
-			body: FilterRequest{
+			body: proxy.FilterRequest{
 				URL:        "http://mock/feed",
 				Expression: `item.Title.contains("Rust")`,
 			},

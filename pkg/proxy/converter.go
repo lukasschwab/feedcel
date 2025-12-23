@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"time"
@@ -7,9 +7,9 @@ import (
 	"github.com/mmcdole/gofeed"
 )
 
-// ToGorillaFeed converts a gofeed.Feed (likely filtered) into a gorilla/feeds.Feed
+// toGorillaFeed converts a gofeed.Feed (likely filtered) into a gorilla/feeds.Feed
 // for serialization.
-func ToGorillaFeed(gf *gofeed.Feed) *feeds.Feed {
+func toGorillaFeed(gf *gofeed.Feed) *feeds.Feed {
 	feed := &feeds.Feed{
 		Title:       gf.Title,
 		Description: gf.Description,

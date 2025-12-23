@@ -9,6 +9,9 @@ import (
 	"github.com/google/cel-go/ext"
 )
 
+type Env struct{ *cel.Env }
+type Program cel.Program
+
 // Item fields jointly derivable from JSON and Atom feeds. This struct is a
 // subset of the item fields stored by [reader].
 //
@@ -28,8 +31,8 @@ type Item struct {
 }
 
 // NewEnv creates a new CEL environment configured for filtering Items.
-func NewEnv() (*cel.Env, error) {
-	return cel.NewEnv(
+func NewEnv() (Env, error) {
+	inner, err := cel.NewEnv(
 		// TODO: consider regex, lists, sets extensions.
 		cel.StdLib(),
 		cel.OptionalTypes(),
@@ -42,10 +45,11 @@ func NewEnv() (*cel.Env, error) {
 		cel.Variable("item", cel.ObjectType("cel.Item")),
 		cel.Variable("now", cel.TimestampType),
 	)
+	return Env{inner}, err
 }
 
 // Compile compiles a CEL expression string.
-func Compile(env *cel.Env, expr string) (cel.Program, error) {
+func Compile(env Env, expr string) (Program, error) {
 	ast, issues := env.Compile(expr)
 	if issues != nil && issues.Err() != nil {
 		return nil, issues.Err()
@@ -57,7 +61,7 @@ func Compile(env *cel.Env, expr string) (cel.Program, error) {
 }
 
 // Evaluate evaluates a compiled CEL program against an item.
-func Evaluate(prg cel.Program, item Item, now time.Time) (bool, error) {
+func Evaluate(prg Program, item Item, now time.Time) (bool, error) {
 	out, _, err := prg.Eval(map[string]any{
 		"item": item,
 		"now":  now,
