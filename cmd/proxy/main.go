@@ -107,9 +107,40 @@ func (f *Filterer) Handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("failed to filter feed: %v", err), http.StatusInternalServerError)
 	}
 
-	// TODO: render this as a feed insteadd of simple JSON encoding.
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(filtered); err != nil {
-		log.Printf("Error encoding response: %v", err)
+	outFeed := ToGorillaFeed(filtered)
+
+	// Determine output format. Default to JSON.
+	// We can support an optional 'format' query param: rss, atom, json
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "json"
+	}
+
+	var content string
+	var contentType string
+	var encodeErr error
+
+	switch format {
+	case "atom":
+		contentType = "application/atom+xml"
+		content, encodeErr = outFeed.ToAtom()
+	case "rss":
+		contentType = "application/rss+xml"
+		content, encodeErr = outFeed.ToRss()
+	case "json":
+		fallthrough
+	default:
+		contentType = "application/json"
+		content, encodeErr = outFeed.ToJSON()
+	}
+
+	if encodeErr != nil {
+		http.Error(w, fmt.Sprintf("failed to encode feed: %v", encodeErr), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	if _, err := w.Write([]byte(content)); err != nil {
+		log.Printf("Error writing response: %v", err)
 	}
 }
