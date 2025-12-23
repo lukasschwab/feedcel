@@ -19,7 +19,12 @@ func main() {
 	port := flag.Int("port", 8080, "Port to listen on")
 	flag.Parse()
 
-	http.HandleFunc("/filter", new(Filterer).Handle)
+	filterer, err := NewFilterer(nil)
+	if err != nil {
+		log.Fatalf("Failed to initialize filterer: %v", err)
+	}
+
+	http.HandleFunc("/filter", filterer.Handle)
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("Starting proxy server on %s", addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
@@ -76,6 +81,7 @@ func (f *Filterer) Filter(
 	return parsed, nil
 }
 
+// TODO: do we have a sensible behavior when there isn't a cel expression provided?
 func (f *Filterer) Handle(w http.ResponseWriter, r *http.Request) {
 	// Support both GET query params and POST JSON body
 	var urlStr, exprStr string
