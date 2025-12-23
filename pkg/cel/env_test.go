@@ -2,6 +2,7 @@ package cel_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/lukasschwab/feedcel/pkg/cel"
 )
@@ -12,7 +13,12 @@ var (
 	RustGoPython = "rust, go, python"
 )
 
+// TODO: add a separate TestCompile function confirming treatment of invalid cel
+// expressions.
+
 func TestEvaluate(t *testing.T) {
+	now := time.Now()
+
 	env, err := cel.NewEnv()
 	if err != nil {
 		t.Fatalf("NewEnv failed: %v", err)
@@ -76,7 +82,7 @@ func TestEvaluate(t *testing.T) {
 				t.Fatalf("Compile failed: %v", err)
 			}
 
-			got, err := cel.Evaluate(prg, tt.item)
+			got, err := cel.Evaluate(prg, tt.item, now)
 			if (err != nil) != tt.wantError {
 				t.Errorf("Evaluate() error = %v, wantError %v", err, tt.wantError)
 				return

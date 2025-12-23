@@ -2,6 +2,7 @@ package cel
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/google/cel-go/cel"
@@ -34,15 +35,11 @@ func NewEnv() (*cel.Env, error) {
 		cel.StdLib(),
 		cel.OptionalTypes(),
 		ext.Strings(),
+		// Register the Item type for strict typing
+		ext.NativeTypes(reflect.TypeOf(Item{})),
 
 		// Define the primary 'item' variable.
-		//
-		// We use cel.AnyType to allow reflection-based access to the struct
-		// fields. For stricter typing, we could define the object type, but Any
-		// is flexible for a start.
-		//
-		// TODO: define an object type here!
-		cel.Variable("item", cel.AnyType),
+		cel.Variable("item", cel.ObjectType("cel.Item")),
 		cel.Variable("now", cel.TimestampType),
 	)
 }
@@ -57,21 +54,10 @@ func Compile(env *cel.Env, expr string) (cel.Program, error) {
 }
 
 // Evaluate evaluates a compiled CEL program against an item.
-func Evaluate(prg cel.Program, item Item) (bool, error) {
-	// Convert Item to map[string]any for CEL compatibility.
-	// We do this manually to ensure correct handling of fields.
-	itemMap := map[string]any{
-		"URL":           item.URL,
-		"Title":         item.Title,
-		"Author":        item.Author,
-		"ContentLength": item.ContentLength,
-		// TODO: want this to be a slice rather than a string
-		"Tags": item.Tags,
-	}
-
+func Evaluate(prg cel.Program, item Item, now time.Time) (bool, error) {
 	out, _, err := prg.Eval(map[string]any{
-		"item": itemMap,
-		"now":  time.Now(),
+		"item": item,
+		"now":  now,
 	})
 	if err != nil {
 		return false, err

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/lukasschwab/feedcel/pkg/cel"
 	"github.com/lukasschwab/feedcel/pkg/feed"
@@ -75,9 +76,10 @@ func handleFilter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. Filter Items
+	now := time.Now()
 	filteredItems := make([]cel.Item, 0)
 	for _, item := range items {
-		match, err := cel.Evaluate(prg, item)
+		match, err := cel.Evaluate(prg, item, now)
 		if err != nil {
 			log.Printf("Error evaluating item %s: %v", item.URL, err)
 			continue
