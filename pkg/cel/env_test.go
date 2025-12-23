@@ -55,7 +55,7 @@ func TestCompile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := cel.Compile(env, tt.expr)
+			_, err := env.Compile(tt.expr)
 			if (err != nil) != tt.wantError {
 				t.Errorf("Compile() error = %v, wantError %v", err, tt.wantError)
 			}
@@ -155,7 +155,7 @@ func TestEvaluate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prg, err := cel.Compile(env, tt.expr)
+			prg, err := env.Compile(tt.expr)
 			if err != nil {
 				t.Fatalf("Compile failed: %v", err)
 			}

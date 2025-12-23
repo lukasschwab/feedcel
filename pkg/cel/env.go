@@ -49,15 +49,15 @@ func NewEnv() (Env, error) {
 }
 
 // Compile compiles a CEL expression string.
-func Compile(env Env, expr string) (Program, error) {
-	ast, issues := env.Compile(expr)
+func (e *Env) Compile(expr string) (Program, error) {
+	ast, issues := e.Env.Compile(expr)
 	if issues != nil && issues.Err() != nil {
 		return nil, issues.Err()
 	}
 	if ast.OutputType() != cel.BoolType {
 		return nil, fmt.Errorf("expression must evaluate to bool, got %v", ast.OutputType())
 	}
-	return env.Program(ast)
+	return e.Env.Program(ast)
 }
 
 // Evaluate evaluates a compiled CEL program against an item.

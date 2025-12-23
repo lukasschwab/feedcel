@@ -46,7 +46,7 @@ func (f *Filterer) Filter(
 	now time.Time,
 	url, expr string,
 ) (*gofeed.Feed, error) {
-	prg, err := cel.Compile(f.env, expr)
+	prg, err := f.env.Compile(expr)
 	if err != nil {
 		return nil, err
 	}

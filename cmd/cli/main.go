@@ -67,7 +67,7 @@ func main() {
 				if s == "" {
 					return errors.New("expression cannot be empty")
 				}
-				_, err := cel.Compile(env, s)
+				_, err := env.Compile(s)
 				return err
 			}).
 			Run()
@@ -79,7 +79,7 @@ func main() {
 		fmt.Println(ANSIYellow + *expr + ANSIReset + "\n")
 	}
 
-	prg, err := cel.Compile(env, *expr)
+	prg, err := env.Compile(*expr)
 	if err != nil {
 		fmt.Printf("Invalid CEL expression: %v\n", err)
 		os.Exit(1)
