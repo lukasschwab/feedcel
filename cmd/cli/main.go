@@ -11,7 +11,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/lukasschwab/feedcel/pkg/cel"
-	"github.com/lukasschwab/feedcel/pkg/feed"
+	gf "github.com/lukasschwab/feedcel/pkg/gofeed"
 	"github.com/mmcdole/gofeed"
 )
 
@@ -88,7 +88,7 @@ func main() {
 	var filtered []*gofeed.Item
 	now := time.Now()
 	for _, item := range parsed.Items {
-		celItem := feed.Transform(item)
+		celItem := gf.Transform(item)
 		match, err := cel.Evaluate(prg, celItem, now)
 		if err != nil {
 			log.Printf("Evaluation error for item '%s': %v", item.Title, err)

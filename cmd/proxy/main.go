@@ -11,7 +11,7 @@ import (
 
 	celgo "github.com/google/cel-go/cel"
 	"github.com/lukasschwab/feedcel/pkg/cel"
-	"github.com/lukasschwab/feedcel/pkg/feed"
+	gf "github.com/lukasschwab/feedcel/pkg/gofeed"
 	"github.com/mmcdole/gofeed"
 )
 
@@ -70,7 +70,7 @@ func (f *Filterer) Filter(
 		return nil, err
 	}
 	parsed.Items = slices.DeleteFunc(parsed.Items, func(i *gofeed.Item) bool {
-		celItem := feed.Transform(i)
+		celItem := gf.Transform(i)
 		match, err := cel.Evaluate(prg, celItem, now)
 		if err != nil {
 			log.Printf("Evaluation failed for item '%v': %v", i.GUID, err)

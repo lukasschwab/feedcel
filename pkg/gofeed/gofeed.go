@@ -1,4 +1,6 @@
-package feed
+// package gofeed provides adapters for feed items parsed by
+// [github.com/mmcdole/gofeed].
+package gofeed
 
 import (
 	"strings"
