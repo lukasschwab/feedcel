@@ -98,9 +98,12 @@ func (f *Filterer) Handle(w http.ResponseWriter, r *http.Request) {
 		exprStr = r.URL.Query().Get("expression")
 	}
 
-	if urlStr == "" || exprStr == "" {
-		http.Error(w, "Missing 'url' or 'expression' parameter", http.StatusBadRequest)
+	if urlStr == "" {
+		http.Error(w, "Missing 'url' parameter", http.StatusBadRequest)
 		return
+	}
+	if exprStr == "" {
+		exprStr = "true"
 	}
 
 	parsed, err := f.parser.ParseURLWithContext(urlStr, r.Context())

@@ -108,6 +108,16 @@ func TestHandle(t *testing.T) {
 			wantFormat:     "json",
 		},
 		{
+			name:   "GET empty expression",
+			method: http.MethodGet,
+			urlParams: map[string]string{
+				"url": "http://mock/feed",
+			},
+			wantStatusCode: http.StatusOK,
+			wantItems:      2,
+			wantFormat:     "json",
+		},
+		{
 			name:   "GET no match",
 			method: http.MethodGet,
 			urlParams: map[string]string{
