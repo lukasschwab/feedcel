@@ -49,6 +49,9 @@ func Compile(env *cel.Env, expr string) (cel.Program, error) {
 	if issues != nil && issues.Err() != nil {
 		return nil, issues.Err()
 	}
+	if ast.OutputType() != cel.BoolType {
+		return nil, fmt.Errorf("expression must evaluate to bool, got %v", ast.OutputType())
+	}
 	return env.Program(ast)
 }
 

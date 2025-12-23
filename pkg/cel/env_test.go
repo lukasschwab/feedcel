@@ -46,6 +46,11 @@ func TestCompile(t *testing.T) {
 			expr:      `item.Title == 123`,
 			wantError: true,
 		},
+		{
+			name:      "Invalid expression (wrong return type)",
+			expr:      `"just a string"`,
+			wantError: true,
+		},
 	}
 
 	for _, tt := range tests {
