@@ -65,6 +65,8 @@ func TestEvaluate(t *testing.T) {
 			},
 			want: true,
 		},
+		// TODO: test content length filter.
+		// TODO: test filtering timestamps using the now cel variable.
 	}
 
 	for _, tt := range tests {

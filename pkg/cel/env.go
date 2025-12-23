@@ -2,6 +2,7 @@ package cel
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/ext"
@@ -14,11 +15,16 @@ import (
 //
 // [reader]: https://github.com/lukasschwab/reader/blob/main/pkg/models/item.go
 type Item struct {
-	URL           string // Required, URL of the item/article
-	Title         *string
-	Author        *string
-	ContentLength int     // Length of the original item content in bytes
-	Tags          *string // Comma-separated, feed-defined tags for the item
+	URL    string
+	Title  *string
+	Author *string
+	Tags   *string // Comma-separated, feed-defined tags for the item
+
+	Content       *string
+	ContentLength int
+
+	Published time.Time
+	Updated   time.Time
 }
 
 // NewEnv creates a new CEL environment configured for filtering Items.
@@ -29,13 +35,15 @@ func NewEnv() (*cel.Env, error) {
 		cel.OptionalTypes(),
 		ext.Strings(),
 
-		// Define the 'item' variable.
+		// Define the primary 'item' variable.
+		//
 		// We use cel.AnyType to allow reflection-based access to the struct
 		// fields. For stricter typing, we could define the object type, but Any
 		// is flexible for a start.
 		//
 		// TODO: define an object type here!
 		cel.Variable("item", cel.AnyType),
+		cel.Variable("now", cel.TimestampType),
 	)
 }
 
@@ -63,6 +71,7 @@ func Evaluate(prg cel.Program, item Item) (bool, error) {
 
 	out, _, err := prg.Eval(map[string]any{
 		"item": itemMap,
+		"now":  time.Now(),
 	})
 	if err != nil {
 		return false, err
