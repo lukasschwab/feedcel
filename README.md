@@ -34,3 +34,7 @@ curl -X POST -d
 - `expression`: CEL expression. The `item` variable exposes fields like `Title`, `URL`, `Author`, `Tags`, and `Content`.
 
 For more details on available fields and expression syntax, see `pkg/cel/env.go` and the test suite in `cmd/proxy/main_test.go`.
+
+## CEL environment
+
+Syntax extended with https://pkg.go.dev/github.com/google/cel-go/ext#Strings
