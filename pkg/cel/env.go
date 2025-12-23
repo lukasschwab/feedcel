@@ -30,10 +30,11 @@ type Item struct {
 // NewEnv creates a new CEL environment configured for filtering Items.
 func NewEnv() (*cel.Env, error) {
 	return cel.NewEnv(
-		// Load standard library extensions (strings, math, etc.)
+		// TODO: consider regex, lists, sets extensions.
 		cel.StdLib(),
 		cel.OptionalTypes(),
 		ext.Strings(),
+
 		// Register the Item type for strict typing
 		ext.NativeTypes(reflect.TypeOf(Item{})),
 
