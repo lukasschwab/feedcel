@@ -8,6 +8,8 @@ import (
 	"log"
 	"os"
 	"time"
+	"encoding/json"
+	"runtime/debug"
 
 	"github.com/charmbracelet/huh"
 	"github.com/lukasschwab/feedcel/pkg/cel"
@@ -22,9 +24,33 @@ const (
 )
 
 func main() {
+	version := flag.Bool("version", false, "Display tool version info (JSON)")
 	feedRef := flag.String("feed", "", "URL or path to the feed")
 	expr := flag.String("expr", "", "CEL expression to filter items")
 	flag.Parse()
+
+	if *version {
+		info, ok := debug.ReadBuildInfo()
+		if !ok {
+			fmt.Println("Error reading build info")
+			os.Exit(1)
+		}
+		settings := make(map[string]string, len(info.Settings))
+		for _, pair := range info.Settings {
+			settings[pair.Key] = pair.Value
+		}
+		b, err := json.MarshalIndent(map[string]any{
+			"go": info.GoVersion,
+			"path": info.Path,
+			"settings": settings,
+		}, "", "\t")
+		if err != nil {
+			fmt.Printf("Error marshaling build info: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(b))
+		return
+	}
 
 	if *feedRef == "" {
 		fmt.Println("Usage: feedcel -feed <url_or_path> [-expr <cel_expression>]")
