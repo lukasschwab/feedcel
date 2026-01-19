@@ -12,6 +12,11 @@ Inspect feeds directly:
 go run ./cmd/cli -feed <url_or_path> -expr "item.Title.contains('Go')"
 ```
 
+Options:
+- `-feed`: URL or local path to the feed (required)
+- `-expr`: CEL expression to filter items (optional)
+- `-version`: Print version information as JSON
+
 Run without `-expr` for interactive input and live validation.
 
 ### Proxy
@@ -31,11 +36,9 @@ curl "http://localhost:8080/filter?url=https://news.ycombinator.com/rss&expressi
 
 **POST:**
 ```bash
-curl -X POST -d 
-  "{
-    \"url\": \"https://news.ycombinator.com/rss\",
-    \"expression\": \"item.Title.contains(\"Go\")\"
-  }" http://localhost:8080/filter
+curl -X POST http://localhost:8080/filter \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://news.ycombinator.com/rss", "expression": "item.Title.contains('\''Go'\'')"}'
 ```
 
 #### Options
@@ -62,24 +65,40 @@ Available fields on the `item` variable. See [`pkg/cel/env.go`](pkg/cel/env.go) 
 Global variables:
 - `now` (timestamp)
 
-### String Extensions
+### String Functions
 
-Includes functions from [`cel-go/ext#Strings`](https://pkg.go.dev/github.com/google/cel-go/ext#Strings):
+Built-in functions from [CEL standard](https://github.com/google/cel-spec/blob/master/doc/langdef.md):
+
+- `contains(string)` — substring check
+- `startsWith(string)`, `endsWith(string)` — prefix/suffix check
+- `matches(regex)` — RE2 regular expression match
+- `size()` — string length
+
+Additional functions from [`cel-go/ext#Strings`](https://pkg.go.dev/github.com/google/cel-go/ext#Strings):
 
 - `charAt`, `indexOf`, `lastIndexOf`
 - `lowerAscii`, `upperAscii`
-- `replace`, `substring`, `trim`
+- `replace`, `split`, `substring`, `trim`
 
 ### Examples
 
 See [`pkg/cel/env_test.go`](pkg/cel/env_test.go) and [`cmd/proxy/main_test.go`](cmd/proxy/main_test.go) for the test suite.
 
 ```cel
-// Simple match
+// Substring match
 item.Title.contains("Go")
 
 // Case-insensitive match
 item.Title.lowerAscii().contains("rust")
+
+// Regex match (RE2 syntax)
+item.Title.matches("(?i)release|announcement")
+
+// Filter by specific tag
+item.Tags.split(",").exists(t, t.trim() == "golang")
+
+// Recent items only
+now - item.Published < duration("24h")
 
 // Composite logic
 (item.Title.contains("release") || item.Tags.contains("v1")) &&

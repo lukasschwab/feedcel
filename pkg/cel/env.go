@@ -33,7 +33,6 @@ type Item struct {
 // NewEnv creates a new CEL environment configured for filtering Items.
 func NewEnv() (Env, error) {
 	inner, err := cel.NewEnv(
-		// TODO: consider regex, lists, sets extensions.
 		cel.StdLib(),
 		cel.OptionalTypes(),
 		ext.Strings(),
