@@ -32,6 +32,22 @@ const mockRSS = `<?xml version="1.0" encoding="UTF-8" ?>
 </channel>
 </rss>`
 
+// mockRSSHTML simulates Cabinet Magazine-style titles with HTML entities and tags.
+const mockRSSHTML = `<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0">
+<channel>
+  <title>Test Feed</title>
+  <item>
+    <title>&amp;ldquo;Sapiens?&amp;rdquo; &lt;br&gt;&lt;small&gt;by Hunter Dukes&lt;/small&gt;</title>
+    <link>http://example.com/1</link>
+  </item>
+  <item>
+    <title>&amp;ldquo;Cover Story&amp;rdquo;</title>
+    <link>http://example.com/2</link>
+  </item>
+</channel>
+</rss>`
+
 type mockTransport struct {
 	responseBody string
 	statusCode   int
@@ -153,6 +169,17 @@ func TestHandle(t *testing.T) {
 			wantItems:      2,
 			wantFormat:     "atom",
 		},
+		{
+			name:   "POST with expressions pipeline",
+			method: http.MethodPost,
+			body: proxy.FilterRequest{
+				URL:         "http://mock/feed",
+				Expressions: []string{"true", `item.Title.contains("Go")`},
+			},
+			wantStatusCode: http.StatusOK,
+			wantItems:      1,
+			wantFormat:     "json",
+		},
 	}
 
 	for _, tt := range tests {
@@ -182,4 +209,62 @@ func TestHandle(t *testing.T) {
 			assert.Len(t, parsedFeed.Items, tt.wantItems)
 		})
 	}
+}
+
+func TestHandleTransform(t *testing.T) {
+	client := &http.Client{
+		Transport: &mockTransport{
+			responseBody: mockRSSHTML,
+			statusCode:   http.StatusOK,
+		},
+	}
+	f, err := proxy.NewFilterer(client)
+	require.NoError(t, err)
+
+	t.Run("POST transform titles", func(t *testing.T) {
+		body := proxy.FilterRequest{
+			URL:         "http://mock/feed",
+			Expressions: []string{`optional.of(htmlUnescape(item.Title.split("<br>")[0].trim()))`},
+		}
+		jsonBody, err := json.Marshal(body)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/filter", bytes.NewReader(jsonBody))
+		w := httptest.NewRecorder()
+		f.Handle(w, req)
+
+		resp := w.Result()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		fp := gofeed.NewParser()
+		parsedFeed, err := fp.Parse(resp.Body)
+		require.NoError(t, err)
+		require.Len(t, parsedFeed.Items, 2)
+		assert.Equal(t, "\u201cSapiens?\u201d", parsedFeed.Items[0].Title)
+		assert.Equal(t, "\u201cCover Story\u201d", parsedFeed.Items[1].Title)
+	})
+
+	t.Run("POST filter then transform pipeline", func(t *testing.T) {
+		body := proxy.FilterRequest{
+			URL: "http://mock/feed",
+			// First filter to only items with "Sapiens", then transform title.
+			Expression:  `item.Title.contains("Sapiens")`,
+			Expressions: []string{`optional.of(htmlUnescape(item.Title.split("<br>")[0].trim()))`},
+		}
+		jsonBody, err := json.Marshal(body)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/filter", bytes.NewReader(jsonBody))
+		w := httptest.NewRecorder()
+		f.Handle(w, req)
+
+		resp := w.Result()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		fp := gofeed.NewParser()
+		parsedFeed, err := fp.Parse(resp.Body)
+		require.NoError(t, err)
+		require.Len(t, parsedFeed.Items, 1)
+		assert.Equal(t, "\u201cSapiens?\u201d", parsedFeed.Items[0].Title)
+	})
 }

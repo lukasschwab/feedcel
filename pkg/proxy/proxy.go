@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/lukasschwab/feedcel/pkg/cel"
@@ -14,8 +13,9 @@ import (
 )
 
 type FilterRequest struct {
-	URL        string `json:"url"`
-	Expression string `json:"expression"`
+	URL         string   `json:"url"`
+	Expression  string   `json:"expression,omitempty"`
+	Expressions []string `json:"expressions,omitempty"`
 }
 
 func NewFilterer(client *http.Client) (*Filterer, error) {
@@ -41,66 +41,60 @@ type Filterer struct {
 	env    cel.Env
 }
 
-func (f *Filterer) Filter(
-	parsed *gofeed.Feed,
-	now time.Time,
-	url, expr string,
-) (*gofeed.Feed, error) {
-	prg, err := f.env.Compile(expr)
-	if err != nil {
-		return nil, err
-	}
-	parsed.Items = slices.DeleteFunc(parsed.Items, func(i *gofeed.Item) bool {
-		celItem := gf.Transform(i)
-		match, err := cel.Evaluate(prg, celItem, now)
-		if err != nil {
-			log.Printf("Evaluation failed for item '%v': %v", i.GUID, err)
-		}
-		// DeleteFunc deletes when predicate is true.
-		return !match
-	})
-	return parsed, nil
-}
-
-// TODO: do we have a sensible behavior when there isn't a cel expression provided?
 func (f *Filterer) Handle(w http.ResponseWriter, r *http.Request) {
-	// Support both GET query params and POST JSON body
-	var urlStr, exprStr string
+	var req FilterRequest
 	if r.Method == http.MethodPost {
-		var req FilterRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 			return
 		}
-		urlStr = req.URL
-		exprStr = req.Expression
 	} else {
-		urlStr = r.URL.Query().Get("url")
-		exprStr = r.URL.Query().Get("expression")
+		req.URL = r.URL.Query().Get("url")
+		req.Expression = r.URL.Query().Get("expression")
 	}
 
-	if urlStr == "" {
+	if req.URL == "" {
 		http.Error(w, "Missing 'url' parameter", http.StatusBadRequest)
 		return
 	}
-	if exprStr == "" {
-		exprStr = "true"
+
+	// Build expression pipeline: Expression (backward compat) then Expressions.
+	var exprs []string
+	if req.Expression != "" {
+		exprs = append(exprs, req.Expression)
+	}
+	exprs = append(exprs, req.Expressions...)
+	if len(exprs) == 0 {
+		exprs = []string{"true"}
 	}
 
-	parsed, err := f.parser.ParseURLWithContext(urlStr, r.Context())
+	// Compile all expressions up front.
+	prgs := make([]cel.Program, 0, len(exprs))
+	for _, expr := range exprs {
+		prg, err := f.env.Compile(expr)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid expression %q: %v", expr, err), http.StatusInternalServerError)
+			return
+		}
+		prgs = append(prgs, prg)
+	}
+
+	// Parse feed.
+	parsed, err := f.parser.ParseURLWithContext(req.URL, r.Context())
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to fetch feed: %v", err), http.StatusBadGateway)
+		return
 	}
 
-	filtered, err := f.Filter(parsed, time.Now(), urlStr, exprStr)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to filter feed: %v", err), http.StatusInternalServerError)
+	// Apply pipeline.
+	now := time.Now()
+	for _, prg := range prgs {
+		gf.Apply(prg, parsed, now)
 	}
 
-	outFeed := toGorillaFeed(filtered)
+	outFeed := toGorillaFeed(parsed)
 
 	// Determine output format. Default to JSON.
-	// We can support an optional 'format' query param: rss, atom, json
 	format := r.URL.Query().Get("format")
 	if format == "" {
 		format = "json"

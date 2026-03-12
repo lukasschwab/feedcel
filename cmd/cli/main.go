@@ -2,14 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
-	"time"
-	"encoding/json"
 	"runtime/debug"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/lukasschwab/feedcel/pkg/cel"
@@ -26,7 +26,8 @@ const (
 func main() {
 	version := flag.Bool("version", false, "Display tool version info (JSON)")
 	feedRef := flag.String("feed", "", "URL or path to the feed")
-	expr := flag.String("expr", "", "CEL expression to filter items")
+	expr := flag.String("expr", "", "CEL expression to filter items (must return bool)")
+	titleExpr := flag.String("title-expr", "", "CEL expression to transform item titles (must return string; auto-wrapped in optional.of(...))")
 	flag.Parse()
 
 	if *version {
@@ -40,8 +41,8 @@ func main() {
 			settings[pair.Key] = pair.Value
 		}
 		b, err := json.MarshalIndent(map[string]any{
-			"go": info.GoVersion,
-			"path": info.Path,
+			"go":       info.GoVersion,
+			"path":     info.Path,
 			"settings": settings,
 		}, "", "\t")
 		if err != nil {
@@ -53,7 +54,7 @@ func main() {
 	}
 
 	if *feedRef == "" {
-		fmt.Println("Usage: feedcel -feed <url_or_path> [-expr <cel_expression>]")
+		fmt.Println("Usage: feedcel -feed <url_or_path> [-expr <cel_expression>] [-title-expr <cel_expression>]")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -111,22 +112,46 @@ func main() {
 		os.Exit(1)
 	}
 
-	var filtered []*gofeed.Item
 	now := time.Now()
+	originalCount := len(parsed.Items)
+
+	// Apply the primary expression with verbose output.
+	var kept []*gofeed.Item
 	for _, item := range parsed.Items {
 		celItem := gf.Transform(item)
-		match, err := cel.Evaluate(prg, celItem, now)
+		result, err := cel.Evaluate(prg, celItem, now)
 		if err != nil {
 			log.Printf("Evaluation error for item '%s': %v", item.Title, err)
 			continue
 		}
-		if match {
-			filtered = append(filtered, item)
+		if !result.Drop {
+			if result.Title != nil {
+				item.Title = *result.Title
+			}
+			kept = append(kept, item)
 			fmt.Printf("Included %v\n", item.Title)
 		} else {
 			fmt.Printf(ANSIGray+"Excluded %v\n"+ANSIReset, item.Title)
 		}
 	}
+	parsed.Items = kept
 
-	fmt.Printf("\nFiltered %d → %d items\n", len(parsed.Items), len(filtered))
+	// Apply title transform if provided. The -title-expr flag accepts a string
+	// expression that is auto-wrapped in optional.of(...) for convenience.
+	if *titleExpr != "" {
+		wrapped := fmt.Sprintf("optional.of(%s)", *titleExpr)
+		tPrg, err := env.Compile(wrapped)
+		if err != nil {
+			fmt.Printf("Invalid title transform expression: %v\n", err)
+			os.Exit(1)
+		}
+		gf.Apply(tPrg, parsed, now)
+
+		fmt.Println("\nTransformed titles:")
+		for _, item := range parsed.Items {
+			fmt.Printf("  %v\n", item.Title)
+		}
+	}
+
+	fmt.Printf("\nFiltered %d → %d items\n", originalCount, len(parsed.Items))
 }
