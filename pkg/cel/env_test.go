@@ -312,4 +312,131 @@ func TestCustomFunctions(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, result.Drop)
 	})
+
+	t.Run("stripTags with plain text (no tags)", func(t *testing.T) {
+		plainTitle := `Just plain text`
+		item := cel.Item{Title: &plainTitle}
+
+		prg, err := env.Compile(`optional.of(item.withTitle(stripTags(item.Title)))`)
+		require.NoError(t, err)
+
+		result, err := cel.Evaluate(prg, item, now)
+		require.NoError(t, err)
+		require.NotNil(t, result.Item)
+		require.NotNil(t, result.Item.Title)
+		assert.Equal(t, "Just plain text", *result.Item.Title)
+	})
+
+	t.Run("stripTags with empty string", func(t *testing.T) {
+		empty := ``
+		item := cel.Item{Title: &empty}
+
+		prg, err := env.Compile(`optional.of(item.withTitle(stripTags(item.Title)))`)
+		require.NoError(t, err)
+
+		result, err := cel.Evaluate(prg, item, now)
+		require.NoError(t, err)
+		require.NotNil(t, result.Item)
+		require.NotNil(t, result.Item.Title)
+		assert.Equal(t, "", *result.Item.Title)
+	})
+
+	t.Run("htmlUnescape with no entities", func(t *testing.T) {
+		plain := `No entities here`
+		item := cel.Item{Title: &plain}
+
+		prg, err := env.Compile(`optional.of(item.withTitle(htmlUnescape(item.Title)))`)
+		require.NoError(t, err)
+
+		result, err := cel.Evaluate(prg, item, now)
+		require.NoError(t, err)
+		require.NotNil(t, result.Item)
+		require.NotNil(t, result.Item.Title)
+		assert.Equal(t, "No entities here", *result.Item.Title)
+	})
+
+	t.Run("htmlUnescape with numeric entities", func(t *testing.T) {
+		numeric := `&#60;div&#62;`
+		item := cel.Item{Title: &numeric}
+
+		prg, err := env.Compile(`optional.of(item.withTitle(htmlUnescape(item.Title)))`)
+		require.NoError(t, err)
+
+		result, err := cel.Evaluate(prg, item, now)
+		require.NoError(t, err)
+		require.NotNil(t, result.Item)
+		require.NotNil(t, result.Item.Title)
+		assert.Equal(t, "<div>", *result.Item.Title)
+	})
+}
+
+func TestEvaluate_WithURL(t *testing.T) {
+	now := time.Now()
+	env, err := cel.NewEnv()
+	require.NoError(t, err)
+
+	prg, err := env.Compile(`optional.of(item.withURL("https://new.example.com"))`)
+	require.NoError(t, err)
+
+	result, err := cel.Evaluate(prg, cel.Item{URL: "https://old.example.com", Title: &Hello}, now)
+	require.NoError(t, err)
+	assert.False(t, result.Drop)
+	require.NotNil(t, result.Item)
+	assert.Equal(t, "https://new.example.com", result.Item.URL)
+}
+
+func TestEvaluate_WithContent(t *testing.T) {
+	now := time.Now()
+	env, err := cel.NewEnv()
+	require.NoError(t, err)
+
+	prg, err := env.Compile(`optional.of(item.withContent("new content"))`)
+	require.NoError(t, err)
+
+	result, err := cel.Evaluate(prg, cel.Item{Title: &Hello, Content: &LoremIpsum}, now)
+	require.NoError(t, err)
+	assert.False(t, result.Drop)
+	require.NotNil(t, result.Item)
+	require.NotNil(t, result.Item.Content)
+	assert.Equal(t, "new content", *result.Item.Content)
+}
+
+func TestEvaluate_WithTags(t *testing.T) {
+	now := time.Now()
+	env, err := cel.NewEnv()
+	require.NoError(t, err)
+
+	prg, err := env.Compile(`optional.of(item.withTags("new,tags"))`)
+	require.NoError(t, err)
+
+	result, err := cel.Evaluate(prg, cel.Item{Title: &Hello, Tags: &RustGoPython}, now)
+	require.NoError(t, err)
+	assert.False(t, result.Drop)
+	require.NotNil(t, result.Item)
+	require.NotNil(t, result.Item.Tags)
+	assert.Equal(t, "new,tags", *result.Item.Tags)
+}
+
+func TestEvaluate_NowVariable(t *testing.T) {
+	env, err := cel.NewEnv()
+	require.NoError(t, err)
+
+	now := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+	oneHourAgo := now.Add(-1 * time.Hour)
+	twoDaysAgo := now.Add(-48 * time.Hour)
+
+	prg, err := env.Compile(`now - item.Published < duration("24h")`)
+	require.NoError(t, err)
+
+	t.Run("recent item passes", func(t *testing.T) {
+		result, err := cel.Evaluate(prg, cel.Item{Title: &Hello, Published: oneHourAgo}, now)
+		require.NoError(t, err)
+		assert.False(t, result.Drop)
+	})
+
+	t.Run("old item fails", func(t *testing.T) {
+		result, err := cel.Evaluate(prg, cel.Item{Title: &Hello, Published: twoDaysAgo}, now)
+		require.NoError(t, err)
+		assert.True(t, result.Drop)
+	})
 }
