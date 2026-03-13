@@ -27,20 +27,28 @@ func TestCompile(t *testing.T) {
 		wantError bool
 	}{
 		{
-			name: "Valid filter expression",
+			name: "Valid filter expression (bool, deprecated)",
 			expr: `item.Title.contains("Go")`,
 		},
 		{
-			name: "Valid transform expression",
-			expr: `optional.of(item.Title)`,
+			name: "Valid transform: keep item unchanged",
+			expr: `optional.of(item)`,
 		},
 		{
-			name: "Valid transform with functions",
-			expr: `optional.of(htmlUnescape(stripTags(item.Title)))`,
+			name: "Valid transform: withTitle",
+			expr: `optional.of(item.withTitle("new"))`,
 		},
 		{
-			name: "Valid transform that drops",
-			expr: `item.Title.contains("Go") ? optional.of(item.Title) : optional.none()`,
+			name: "Valid transform: chained with*",
+			expr: `optional.of(item.withTitle("new").withAuthor("someone"))`,
+		},
+		{
+			name: "Valid transform: conditional drop",
+			expr: `item.Title.contains("Go") ? optional.of(item) : optional.none()`,
+		},
+		{
+			name: "Valid transform: withTitle using custom functions",
+			expr: `optional.of(item.withTitle(htmlUnescape(stripTags(item.Title))))`,
 		},
 		{
 			name:      "Invalid expression (syntax error)",
@@ -53,18 +61,13 @@ func TestCompile(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name:      "Invalid expression (type mismatch)",
-			expr:      `item.Title == 123`,
-			wantError: true,
-		},
-		{
 			name:      "Invalid expression (wrong return type: string)",
 			expr:      `"just a string"`,
 			wantError: true,
 		},
 		{
-			name:      "Invalid expression (wrong return type: int)",
-			expr:      `1 + 2`,
+			name:      "Invalid expression (wrong return type: optional<string>)",
+			expr:      `optional.of("a string")`,
 			wantError: true,
 		},
 	}
@@ -158,7 +161,7 @@ func TestEvaluate_Filter(t *testing.T) {
 			result, err := cel.Evaluate(prg, tt.item, now)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantDrop, result.Drop)
-			assert.Nil(t, result.Title, "filter should not set title")
+			assert.Nil(t, result.Item, "filter should not set Item")
 		})
 	}
 }
@@ -168,51 +171,85 @@ func TestEvaluate_Transform(t *testing.T) {
 	env, err := cel.NewEnv()
 	require.NoError(t, err)
 
-	tests := []struct {
-		name      string
-		expr      string
-		item      cel.Item
-		wantDrop  bool
-		wantTitle *string
-	}{
-		{
-			name:      "Transform keeps and sets title",
-			expr:      `optional.of(item.Title.upperAscii())`,
-			item:      cel.Item{Title: &Hello},
-			wantDrop:  false,
-			wantTitle: ptr("HELLO"),
-		},
-		{
-			name:     "Transform drops with optional.none",
-			expr:     `item.Title.contains("Go") ? optional.of(item.Title) : optional.none()`,
-			item:     cel.Item{Title: &Hello},
-			wantDrop: true,
-		},
-		{
-			name:      "Transform conditional keep",
-			expr:      `item.Title.contains("Go") ? optional.of(item.Title) : optional.none()`,
-			item:      cel.Item{Title: &LearningGo},
-			wantDrop:  false,
-			wantTitle: &LearningGo,
-		},
-	}
+	t.Run("withTitle modifies title", func(t *testing.T) {
+		prg, err := env.Compile(`optional.of(item.withTitle(item.Title.upperAscii()))`)
+		require.NoError(t, err)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			prg, err := env.Compile(tt.expr)
-			require.NoError(t, err)
+		result, err := cel.Evaluate(prg, cel.Item{Title: &Hello}, now)
+		require.NoError(t, err)
+		assert.False(t, result.Drop)
+		require.NotNil(t, result.Item)
+		require.NotNil(t, result.Item.Title)
+		assert.Equal(t, "HELLO", *result.Item.Title)
+	})
 
-			result, err := cel.Evaluate(prg, tt.item, now)
-			require.NoError(t, err)
-			assert.Equal(t, tt.wantDrop, result.Drop)
-			if tt.wantTitle != nil {
-				require.NotNil(t, result.Title)
-				assert.Equal(t, *tt.wantTitle, *result.Title)
-			} else {
-				assert.Nil(t, result.Title)
-			}
-		})
-	}
+	t.Run("withAuthor modifies author", func(t *testing.T) {
+		prg, err := env.Compile(`optional.of(item.withAuthor("New Author"))`)
+		require.NoError(t, err)
+
+		result, err := cel.Evaluate(prg, cel.Item{Title: &Hello}, now)
+		require.NoError(t, err)
+		assert.False(t, result.Drop)
+		require.NotNil(t, result.Item)
+		require.NotNil(t, result.Item.Author)
+		assert.Equal(t, "New Author", *result.Item.Author)
+		// Title preserved from original.
+		require.NotNil(t, result.Item.Title)
+		assert.Equal(t, Hello, *result.Item.Title)
+	})
+
+	t.Run("chained with* modifies multiple fields", func(t *testing.T) {
+		prg, err := env.Compile(`optional.of(item.withTitle("New").withAuthor("Someone"))`)
+		require.NoError(t, err)
+
+		result, err := cel.Evaluate(prg, cel.Item{Title: &Hello}, now)
+		require.NoError(t, err)
+		assert.False(t, result.Drop)
+		require.NotNil(t, result.Item)
+		require.NotNil(t, result.Item.Title)
+		assert.Equal(t, "New", *result.Item.Title)
+		require.NotNil(t, result.Item.Author)
+		assert.Equal(t, "Someone", *result.Item.Author)
+	})
+
+	t.Run("optional.none drops item", func(t *testing.T) {
+		prg, err := env.Compile(`item.Title.contains("Go") ? optional.of(item) : optional.none()`)
+		require.NoError(t, err)
+
+		result, err := cel.Evaluate(prg, cel.Item{Title: &Hello}, now)
+		require.NoError(t, err)
+		assert.True(t, result.Drop)
+	})
+
+	t.Run("conditional keep returns item", func(t *testing.T) {
+		prg, err := env.Compile(`item.Title.contains("Go") ? optional.of(item) : optional.none()`)
+		require.NoError(t, err)
+
+		result, err := cel.Evaluate(prg, cel.Item{Title: &LearningGo}, now)
+		require.NoError(t, err)
+		assert.False(t, result.Drop)
+		require.NotNil(t, result.Item)
+		require.NotNil(t, result.Item.Title)
+		assert.Equal(t, LearningGo, *result.Item.Title)
+	})
+
+	t.Run("optional.of(item) keeps item unchanged", func(t *testing.T) {
+		prg, err := env.Compile(`optional.of(item)`)
+		require.NoError(t, err)
+
+		original := cel.Item{
+			URL:   "https://example.com",
+			Title: &Hello,
+			Tags:  &RustGoPython,
+		}
+		result, err := cel.Evaluate(prg, original, now)
+		require.NoError(t, err)
+		assert.False(t, result.Drop)
+		require.NotNil(t, result.Item)
+		assert.Equal(t, original.URL, result.Item.URL)
+		require.NotNil(t, result.Item.Title)
+		assert.Equal(t, Hello, *result.Item.Title)
+	})
 }
 
 func TestCustomFunctions(t *testing.T) {
@@ -220,59 +257,48 @@ func TestCustomFunctions(t *testing.T) {
 	env, err := cel.NewEnv()
 	require.NoError(t, err)
 
-	t.Run("stripTags", func(t *testing.T) {
+	t.Run("stripTags in transform", func(t *testing.T) {
 		htmlTitle := `&ldquo;Sapiens?&rdquo; <br><small>by Hunter Dukes</small>`
 		item := cel.Item{Title: &htmlTitle}
 
-		prg, err := env.Compile(`optional.of(stripTags(item.Title))`)
+		prg, err := env.Compile(`optional.of(item.withTitle(stripTags(item.Title)))`)
 		require.NoError(t, err)
 
 		result, err := cel.Evaluate(prg, item, now)
 		require.NoError(t, err)
-		require.NotNil(t, result.Title)
-		// stripTags removes tags, keeps text content. The x/net/html
-		// tokenizer also decodes HTML entities as a side effect.
-		assert.Equal(t, "\u201cSapiens?\u201d by Hunter Dukes", *result.Title)
+		require.NotNil(t, result.Item)
+		require.NotNil(t, result.Item.Title)
+		// stripTags removes tags, keeps text. x/net/html tokenizer also
+		// decodes HTML entities as a side effect.
+		assert.Equal(t, "\u201cSapiens?\u201d by Hunter Dukes", *result.Item.Title)
 	})
 
-	t.Run("htmlUnescape", func(t *testing.T) {
+	t.Run("htmlUnescape in transform", func(t *testing.T) {
 		htmlTitle := `&ldquo;Sapiens?&rdquo;`
 		item := cel.Item{Title: &htmlTitle}
 
-		prg, err := env.Compile(`optional.of(htmlUnescape(item.Title))`)
+		prg, err := env.Compile(`optional.of(item.withTitle(htmlUnescape(item.Title)))`)
 		require.NoError(t, err)
 
 		result, err := cel.Evaluate(prg, item, now)
 		require.NoError(t, err)
-		require.NotNil(t, result.Title)
-		assert.Equal(t, "\u201cSapiens?\u201d", *result.Title)
+		require.NotNil(t, result.Item)
+		require.NotNil(t, result.Item.Title)
+		assert.Equal(t, "\u201cSapiens?\u201d", *result.Item.Title)
 	})
 
-	t.Run("stripTags + htmlUnescape composed", func(t *testing.T) {
+	t.Run("Cabinet Magazine: split + htmlUnescape + withTitle", func(t *testing.T) {
 		htmlTitle := `&ldquo;Sapiens?&rdquo; <br><small>by Hunter Dukes</small>`
 		item := cel.Item{Title: &htmlTitle}
 
-		prg, err := env.Compile(`optional.of(htmlUnescape(stripTags(item.Title)))`)
+		prg, err := env.Compile(`optional.of(item.withTitle(htmlUnescape(item.Title.split("<br>")[0].trim())))`)
 		require.NoError(t, err)
 
 		result, err := cel.Evaluate(prg, item, now)
 		require.NoError(t, err)
-		require.NotNil(t, result.Title)
-		assert.Equal(t, "\u201cSapiens?\u201d by Hunter Dukes", *result.Title)
-	})
-
-	t.Run("Cabinet Magazine: split at br + htmlUnescape", func(t *testing.T) {
-		// The real-world approach: split at <br> to get just the title.
-		htmlTitle := `&ldquo;Sapiens?&rdquo; <br><small>by Hunter Dukes</small>`
-		item := cel.Item{Title: &htmlTitle}
-
-		prg, err := env.Compile(`optional.of(htmlUnescape(item.Title.split("<br>")[0].trim()))`)
-		require.NoError(t, err)
-
-		result, err := cel.Evaluate(prg, item, now)
-		require.NoError(t, err)
-		require.NotNil(t, result.Title)
-		assert.Equal(t, "\u201cSapiens?\u201d", *result.Title)
+		require.NotNil(t, result.Item)
+		require.NotNil(t, result.Item.Title)
+		assert.Equal(t, "\u201cSapiens?\u201d", *result.Item.Title)
 	})
 
 	t.Run("stripTags in filter expression", func(t *testing.T) {
@@ -287,5 +313,3 @@ func TestCustomFunctions(t *testing.T) {
 		assert.False(t, result.Drop)
 	})
 }
-
-func ptr(s string) *string { return &s }

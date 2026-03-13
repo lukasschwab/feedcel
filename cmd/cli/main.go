@@ -125,8 +125,11 @@ func main() {
 			continue
 		}
 		if !result.Drop {
-			if result.Title != nil {
-				item.Title = *result.Title
+			if result.Item != nil {
+				// Transform applied inline; title may have changed.
+				if result.Item.Title != nil {
+					item.Title = *result.Item.Title
+				}
 			}
 			kept = append(kept, item)
 			fmt.Printf("Included %v\n", item.Title)
@@ -139,7 +142,7 @@ func main() {
 	// Apply title transform if provided. The -title-expr flag accepts a string
 	// expression that is auto-wrapped in optional.of(...) for convenience.
 	if *titleExpr != "" {
-		wrapped := fmt.Sprintf("optional.of(%s)", *titleExpr)
+		wrapped := fmt.Sprintf("optional.of(item.withTitle(%s))", *titleExpr)
 		tPrg, err := env.Compile(wrapped)
 		if err != nil {
 			fmt.Printf("Invalid title transform expression: %v\n", err)

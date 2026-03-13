@@ -224,7 +224,7 @@ func TestHandleTransform(t *testing.T) {
 	t.Run("POST transform titles", func(t *testing.T) {
 		body := proxy.FilterRequest{
 			URL:         "http://mock/feed",
-			Expressions: []string{`optional.of(htmlUnescape(item.Title.split("<br>")[0].trim()))`},
+			Expressions: []string{`optional.of(item.withTitle(htmlUnescape(item.Title.split("<br>")[0].trim())))`},
 		}
 		jsonBody, err := json.Marshal(body)
 		require.NoError(t, err)
@@ -249,7 +249,7 @@ func TestHandleTransform(t *testing.T) {
 			URL: "http://mock/feed",
 			// First filter to only items with "Sapiens", then transform title.
 			Expression:  `item.Title.contains("Sapiens")`,
-			Expressions: []string{`optional.of(htmlUnescape(item.Title.split("<br>")[0].trim()))`},
+			Expressions: []string{`optional.of(item.withTitle(htmlUnescape(item.Title.split("<br>")[0].trim())))`},
 		}
 		jsonBody, err := json.Marshal(body)
 		require.NoError(t, err)

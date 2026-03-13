@@ -25,8 +25,8 @@ const (
 )
 
 // Program is a compiled CEL expression for processing feed items.
-// A filter program (bool) keeps or drops items.
-// A transform program (optional<string>) can rewrite titles and/or drop items.
+// A filter program (bool) keeps or drops items. Deprecated: prefer transform.
+// A transform program (optional<cel.Item>) can modify items and/or drop them.
 type Program struct {
 	program cel.Program
 	kind    programKind
@@ -34,8 +34,8 @@ type Program struct {
 
 // Result describes how to process an item after program evaluation.
 type Result struct {
-	Drop  bool    // If true, remove the item from the feed.
-	Title *string // If non-nil, update the item's title.
+	Drop bool  // If true, remove the item from the feed.
+	Item *Item // If non-nil, use this item's fields to update the feed item.
 }
 
 // Item fields jointly derivable from JSON and Atom feeds. This struct is a
@@ -54,18 +54,20 @@ type Item struct {
 	Updated   time.Time
 }
 
+var itemType = cel.ObjectType("cel.Item")
+
 // NewEnv creates a new CEL environment configured for processing Items.
 func NewEnv() (Env, error) {
-	inner, err := cel.NewEnv(
+	base, err := cel.NewEnv(
 		cel.StdLib(),
 		cel.OptionalTypes(),
 		ext.Strings(),
 
-		// Register the Item type for strict typing
+		// Register the Item type for strict typing.
 		ext.NativeTypes(reflect.TypeOf(Item{})),
 
 		// Define the primary 'item' variable.
-		cel.Variable("item", cel.ObjectType("cel.Item")),
+		cel.Variable("item", itemType),
 		cel.Variable("now", cel.TimestampType),
 
 		// Custom string functions for HTML processing.
@@ -84,7 +86,68 @@ func NewEnv() (Env, error) {
 			),
 		),
 	)
-	return Env{inner}, err
+	if err != nil {
+		return Env{}, err
+	}
+
+	// Extend with item.with* member functions. These need the type adapter
+	// from the base env to convert Go Item values back to CEL values.
+	adapter := base.CELTypeAdapter()
+
+	inner, err := base.Extend(
+		cel.Function("withTitle",
+			cel.MemberOverload("item_withTitle",
+				[]*cel.Type{itemType, cel.StringType}, itemType,
+				cel.BinaryBinding(withFieldBinding(adapter, func(i *Item, s string) { i.Title = &s })),
+			),
+		),
+		cel.Function("withAuthor",
+			cel.MemberOverload("item_withAuthor",
+				[]*cel.Type{itemType, cel.StringType}, itemType,
+				cel.BinaryBinding(withFieldBinding(adapter, func(i *Item, s string) { i.Author = &s })),
+			),
+		),
+		cel.Function("withURL",
+			cel.MemberOverload("item_withURL",
+				[]*cel.Type{itemType, cel.StringType}, itemType,
+				cel.BinaryBinding(withFieldBinding(adapter, func(i *Item, s string) { i.URL = s })),
+			),
+		),
+		cel.Function("withContent",
+			cel.MemberOverload("item_withContent",
+				[]*cel.Type{itemType, cel.StringType}, itemType,
+				cel.BinaryBinding(withFieldBinding(adapter, func(i *Item, s string) { i.Content = &s })),
+			),
+		),
+		cel.Function("withTags",
+			cel.MemberOverload("item_withTags",
+				[]*cel.Type{itemType, cel.StringType}, itemType,
+				cel.BinaryBinding(withFieldBinding(adapter, func(i *Item, s string) { i.Tags = &s })),
+			),
+		),
+	)
+	if err != nil {
+		return Env{}, err
+	}
+
+	return Env{inner}, nil
+}
+
+// withFieldBinding creates a BinaryBinding that copies an Item, applies a
+// setter to one field, and returns the modified copy as a CEL value.
+func withFieldBinding(adapter types.Adapter, setter func(*Item, string)) func(ref.Val, ref.Val) ref.Val {
+	return func(lhs, rhs ref.Val) ref.Val {
+		item, ok := lhs.Value().(Item)
+		if !ok {
+			return types.NewErr("expected Item receiver")
+		}
+		s, ok := rhs.Value().(string)
+		if !ok {
+			return types.NewErr("expected string argument")
+		}
+		setter(&item, s)
+		return adapter.NativeToValue(item)
+	}
 }
 
 func stripTagsBinding(val ref.Val) ref.Val {
@@ -121,15 +184,17 @@ func stripTags(s string) string {
 	}
 }
 
-// isOptionalStringType checks whether a CEL type is optional<string>.
-func isOptionalStringType(t *cel.Type) bool {
-	want := cel.OptionalType(cel.StringType)
+// isOptionalItemType checks whether a CEL type is optional<cel.Item>.
+func isOptionalItemType(t *cel.Type) bool {
+	want := cel.OptionalType(itemType)
 	return t == want || t.String() == want.String()
 }
 
 // Compile compiles a CEL expression string. The expression must evaluate to
-// either bool (filter: true keeps, false drops) or optional<string> (transform:
-// some(s) keeps item and sets title to s, none drops item).
+// either:
+//   - bool: Deprecated filter shorthand. true keeps the item, false drops it.
+//   - optional<cel.Item>: Transform. some(item) keeps (with modifications),
+//     none drops. Use item.withTitle(...) etc. to modify fields.
 func (e *Env) Compile(expr string) (Program, error) {
 	ast, issues := e.Env.Compile(expr)
 	if issues != nil && issues.Err() != nil {
@@ -141,10 +206,10 @@ func (e *Env) Compile(expr string) (Program, error) {
 	switch {
 	case outType == cel.BoolType:
 		kind = filterProgram
-	case isOptionalStringType(outType):
+	case isOptionalItemType(outType):
 		kind = transformProgram
 	default:
-		return Program{}, fmt.Errorf("expression must evaluate to bool or optional<string>, got %v", outType)
+		return Program{}, fmt.Errorf("expression must evaluate to bool or optional<cel.Item>, got %v", outType)
 	}
 
 	prg, err := e.Env.Program(ast)
@@ -180,13 +245,24 @@ func Evaluate(prg Program, item Item, now time.Time) (Result, error) {
 		if !opt.HasValue() {
 			return Result{Drop: true}, nil
 		}
-		s, ok := opt.GetValue().Value().(string)
-		if !ok {
-			return Result{}, fmt.Errorf("optional value is not a string")
+		newItem, err := extractItem(opt.GetValue())
+		if err != nil {
+			return Result{}, err
 		}
-		return Result{Drop: false, Title: &s}, nil
+		return Result{Drop: false, Item: newItem}, nil
 
 	default:
 		return Result{}, fmt.Errorf("unknown program kind")
+	}
+}
+
+func extractItem(val ref.Val) (*Item, error) {
+	switch v := val.Value().(type) {
+	case Item:
+		return &v, nil
+	case *Item:
+		return v, nil
+	default:
+		return nil, fmt.Errorf("optional value is not an Item, got %T", v)
 	}
 }
