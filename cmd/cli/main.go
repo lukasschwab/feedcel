@@ -26,8 +26,7 @@ const (
 func main() {
 	version := flag.Bool("version", false, "Display tool version info (JSON)")
 	feedRef := flag.String("feed", "", "URL or path to the feed")
-	expr := flag.String("expr", "", "CEL expression to filter items (must return bool)")
-	titleExpr := flag.String("title-expr", "", "CEL expression to transform item titles (must return string; auto-wrapped in optional.of(...))")
+	expr := flag.String("expr", "", "CEL expression (bool to filter, optional<cel.Item> to transform)")
 	flag.Parse()
 
 	if *version {
@@ -54,7 +53,7 @@ func main() {
 	}
 
 	if *feedRef == "" {
-		fmt.Println("Usage: feedcel -feed <url_or_path> [-expr <cel_expression>] [-title-expr <cel_expression>]")
+		fmt.Println("Usage: feedcel -feed <url_or_path> [-expr <cel_expression>]")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -138,23 +137,6 @@ func main() {
 		}
 	}
 	parsed.Items = kept
-
-	// Apply title transform if provided. The -title-expr flag accepts a string
-	// expression that is auto-wrapped in optional.of(...) for convenience.
-	if *titleExpr != "" {
-		wrapped := fmt.Sprintf("optional.of(item.withTitle(%s))", *titleExpr)
-		tPrg, err := env.Compile(wrapped)
-		if err != nil {
-			fmt.Printf("Invalid title transform expression: %v\n", err)
-			os.Exit(1)
-		}
-		gf.Apply(tPrg, parsed, now)
-
-		fmt.Println("\nTransformed titles:")
-		for _, item := range parsed.Items {
-			fmt.Printf("  %v\n", item.Title)
-		}
-	}
 
 	fmt.Printf("\nFiltered %d → %d items\n", originalCount, len(parsed.Items))
 }
